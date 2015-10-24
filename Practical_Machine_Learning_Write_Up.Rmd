@@ -1,7 +1,7 @@
 ---
-title: "Practical Machine Learn-Project Write Up"
+title: "Practical Machine Learning Project Write_Up"
 author: "Andria Hall"
-date: "Sunday, October 26, 2015"
+date: "Sunday, October 25, 2015"
 output: html_document
 ---
 
@@ -76,8 +76,8 @@ We will next Split the DTrain into 60% training and 40% testing dataset.
 
 ```{r}
 library(caret)
-seed <- as.numeric(as.Date("2014-10-26"))
-set.seed(seed)
+
+set.seed(12345)
 trainIndex <- createDataPartition(DTrain$classe, p=0.6)
 trainData <- DTrain[trainIndex[[1]]]
 testData <- DTrain[-trainIndex[[1]]]
@@ -153,7 +153,7 @@ varImp(Fitmod)
 Examine groups of predictable variable
 
 ```{r}
-set.seed(1)
+set.seed(12345)
 modFit <- rpart(classe ~ ., data=DTrainCS, method="class")
 
 fancyRpartPlot(modFit)
