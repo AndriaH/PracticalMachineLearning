@@ -1,0 +1,197 @@
+---
+title: "Practical Machine Learn-Project Write Up"
+author: "Andria Hall"
+date: "Sunday, October 26, 2015"
+output: html_document
+---
+
+### Background
+
+This project write-up is to build a machine learning model based on a group of enthusiasts who take measurements about themselves regularly to improve their health. This data comes from accelerometers on the belt, forearm, arm and dumbell of **six** participants who were asked to perform barbell lifts correctly and incorrectly in five different ways.
+
+### Reproduceability
+
+We will load the appropriate packages and set the seed for reproduceable results.
+
+```{r load_packages}
+library(randomForest)
+library(parallel)
+library(doParallel)
+library(rattle)
+library(rpart.plot)
+```
+
+We will now import the testing data and the training data and test for identicality.
+
+```{r}
+library(data.table)
+
+# Load the training data set
+setInternet2(TRUE)
+
+# Load the training data set
+url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+DTrain <- fread(url)
+trainColnames <- colnames(DTrain)
+
+# Load the testing data set
+url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+DTest <- fread(url)
+testColnames <- colnames(DTest)
+
+# Verify that the column names (excluding classe and problem_id) are identical in the training and testing set.
+all.equal(trainColnames[1:length(trainColnames)-1], testColnames[1:length(trainColnames)-1])
+```
+
+We will now remove all `NA` values and columns: `X`, `user_name`, `raw_timestamp_part_1`, `raw_timestamp_part_2`, `cvtd_timestamp`, `new_window` `num_window` as they are not predictors.
+
+```{r}
+# Discard columns with missing values
+DiscardNAs <- sapply(DTest, function (x) any(is.na(x) | x == ""))
+isPredictor <- !DiscardNAs & grepl("belt|[^(fore)]arm|dumbbell|forearm", names(DiscardNAs))
+predData <- names(DiscardNAs)[isPredictor]
+predData
+```
+
+
+We will now subset the predData to include only the predictors and the outcome variable, `classe`.
+
+```{r}
+# Subset predData dataset
+predDataClasse <- c("classe", predData)
+DTrain <- DTrain[, predDataClasse, with=FALSE]
+dim(DTrain)
+names(DTrain)
+```
+
+and make `classe` a factor.
+
+```{r}
+DTrain <- DTrain[, classe := factor(DTrain[, classe])]
+DTrain[, .N, classe]
+```
+
+We will next Split the DTrain into 60% training and 40% testing dataset.
+
+
+```{r}
+library(caret)
+seed <- as.numeric(as.Date("2014-10-26"))
+set.seed(seed)
+trainIndex <- createDataPartition(DTrain$classe, p=0.6)
+trainData <- DTrain[trainIndex[[1]]]
+testData <- DTrain[-trainIndex[[1]]]
+```
+
+Preprocess the prediction variables by centering and scaling.
+
+```{r}
+X <- trainData[, predData, with=FALSE]
+preProc <- preProcess(X)
+preProc
+
+XCS <- predict(preProc, X)
+DTrainCS <- data.table(data.frame(classe = trainData[, classe], XCS))
+```
+
+Apply the centering and scaling to the probing dataset.
+
+```{r}
+X <- testData[, predData, with=FALSE]
+XCS <- predict(preProc, X)
+DProbeCS <- data.table(data.frame(classe = testData[, classe], XCS))
+```
+
+We will check for covariates that have near zero variance
+
+```{r}
+nzv <- nearZeroVar(DTrain, saveMetrics=TRUE)
+if (any(nzv$nzv)) nzv else message("No variables with near zero variance")
+```
+
+Training the dataset using random forest algorithm
+
+
+```{r}
+# Configure the train control for cross-validation
+
+cl <- makeCluster(detectCores() -1)
+registerDoParallel(cl)
+
+tctrl <- trainControl(classProbs=TRUE, savePredictions=TRUE, allowParallel = TRUE)
+
+# Fit the model using Random Forests algorithm
+Fitmod <- randomForest(classe ~.,  data = DTrainCS,
+                method="rf")
+stopCluster(cl)
+```
+
+```{r}
+print(Fitmod)
+```
+
+### Evaluate the model on the training dataset
+
+```{r}
+pred <- predict(Fitmod, DTrainCS)
+confusionMatrix(pred, DTrainCS[, classe])
+```
+
+### Evaluate the model on the testing dataset
+
+```{r}
+pred <- predict(Fitmod, DProbeCS)
+confusionMatrix(pred, DProbeCS[, classe])
+```
+
+### Display the final model
+
+```{r}
+varImp(Fitmod)
+```
+
+Examine groups of predictable variable
+
+```{r}
+set.seed(1)
+modFit <- rpart(classe ~ ., data=DTrainCS, method="class")
+
+fancyRpartPlot(modFit)
+```
+
+
+Save training model object for later.
+
+```{r}
+save(Fitmod, file="Fitmod.RData")
+```
+
+
+### Predict on the test data
+
+```{r}
+# Load Fitmod data
+load(file="Fitmod.RData", verbose=TRUE)
+```
+
+Get predictions and evaluate
+
+```{r}
+DTestCS <- predict(preProc, DTest[, predData, with=FALSE])
+pred <- predict(Fitmod, DTestCS)
+DTest <- cbind(pred, DTestCS)
+subset(DTest, select=names(DTest)[grep("belt|[^(fore)]arm|dumbell|forearm", names(DTest), invert=TRUE)])
+```
+
+### Write submission files to `pred` in Practical Machine Learning folder 
+
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+    for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(pred)
+```
